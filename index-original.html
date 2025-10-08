@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow, nosnippet, noarchive" />
+  <title>Dolmenwood Combat Calculator</title>
+  <!-- React 18 UMD -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel (for JSX in-browser) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <!-- Tailwind (v2 CDN; some utilities from v3 like min-w-28 may not exist) -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet" />
+  <style>
+    .icon-sword::before { content: "⚔️"; }
+    .icon-shield::before { content: "🛡️"; }
+    .icon-skull::before { content: "💀"; }
+    .icon-eye::before { content: "👁️"; }
+    .icon-heart::before { content: "❤️"; }
+    .icon-clock::before { content: "⏰"; }
+    .icon-dice::before { content: "🎲"; }
+    .icon-magic::before { content: "✨"; }
+    .icon-target::before { content: "🎯"; }
+    .icon-undo::before { content: "↶"; }
+    .icon-save::before { content: "💾"; }
+    .icon-load::before { content: "📁"; }
+
+    /* Dolmenwood Colour Palette */
+    .dolmenwood-card { background: #f7f5f0; border-color: #8b7355; }
+    .dolmenwood-text { color: #2d4a1a; }
+    .dolmenwood-accent { background: #8b7355; }
+    .dolmenwood-moss { background: #7a8471; }
+    .dolmenwood-bark { background: #654321; }
+    .dolmenwood-weak { background: #7a8471; }
+    .dolmenwood-medium { background: #d4af37; }
+    .dolmenwood-strong { background: #8b4513; }
+
+    .dolmenwood-damage { background: #8b4513; }
+    .dolmenwood-heal { background: #228b22; }
+    .dolmenwood-attack { background: #b8860b; }
+    .dolmenwood-morale { background: #696969; }
+    .dolmenwood-remove { background: #a0522d; }
+    .dolmenwood-custom { background: #8b5a2b; }
+
+    .targeting { border: 3px dashed #f59e0b; background-color: #fef3c7; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- NOTE: use data-presets so JSX/modern syntax compiles correctly -->
+  <script type="text/babel" data-presets="react,env">
+    const { useState, useEffect } = React; // ensure useEffect exists in scope
+
+    const DolmenwoodCombatCalculator = () => {
+      const [round, setRound] = useState(1);
+      const [activeIndex, setActiveIndex] = useState(0);
+      const [combatants, setCombatants] = useState([]);
+      const [actionHistory, setActionHistory] = useState([]);
+      const [targetingMode, setTargetingMode] = useState(null); // { attacker: id, type: 'attack' }
+      const [targetAC, setTargetAC] = useState(15);
+      const [customDamage, setCustomDamage] = useState('');
+      const [advantageMode, setAdvantageMode] = useState('normal');
+      const [lastRoll, setLastRoll] = useState(null);
+      const [newCombatant, setNewCombatant] = useState({
+        name: '', hp: 10, maxHp: 10, ac: 10, attack: 0, damage: '1d6', initiative: 0,
+        type: 'npc', isPlayer: false, declaredAction: 'none', concentratingOn: '',
+        saves: { doom: 13, ray: 14, hold: 13, blast: 15, spell: 14 }
+      });
+
+      // Optional: persist encounter in localStorage
+      useEffect(() => {
+        try {
+          const saved = localStorage.getItem('dw-encounter');
+          if (saved) {
+            const obj = JSON.parse(saved);
+            setRound(obj.round ?? 1);
+            setActiveIndex(obj.activeIndex ?? 0);
+            setCombatants(obj.combatants ?? []);
+            setActionHistory(obj.actionHistory ?? []);
+          }
+        } catch {}
+      }, []);
+      useEffect(() => {
+        try {
+          localStorage.setItem('dw-encounter', JSON.stringify({ round, activeIndex, combatants, actionHistory }));
+        } catch {}
+      }, [round, activeIndex, combatants, actionHistory]);
+
+      const monsterTemplates = {
+        weak: {
+          rat: { name: 'Giant Rat', hp: 2, maxHp: 2, ac: 11, attack: 0, damage: '1d4', saves: { doom: 14, ray: 15, hold: 14, blast: 16, spell: 15 } },
+          goblin: { name: 'Goblin', hp: 4, maxHp: 4, ac: 13, attack: 1, damage: '1d6', saves: { doom: 13, ray: 14, hold: 13, blast: 15, spell: 14 } },
+          bandit: { name: 'Bandit', hp: 5, maxHp: 5, ac: 12, attack: 2, damage: '1d6+1', saves: { doom: 12, ray: 13, hold: 12, blast: 14, spell: 13 } },
+          skeleton: { name: 'Skeleton', hp: 4, maxHp: 4, ac: 13, attack: 1, damage: '1d6', saves: { doom: 10, ray: 13, hold: 10, blast: 14, spell: 11 } },
+          stirge: { name: 'Stirge', hp: 2, maxHp: 2, ac: 14, attack: 1, damage: '1d4', saves: { doom: 14, ray: 15, hold: 14, blast: 16, spell: 15 } },
+          sprite: { name: 'Fairy Sprite', hp: 1, maxHp: 1, ac: 15, attack: 2, damage: '1d4', saves: { doom: 12, ray: 13, hold: 11, blast: 13, spell: 12 } }
+        },
+        medium: {
+          wolf: { name: 'Wolf', hp: 11, maxHp: 11, ac: 13, attack: 2, damage: '1d6+1', saves: { doom: 12, ray: 13, hold: 12, blast: 14, spell: 13 } },
+          orc: { name: 'Crookhorn Warrior', hp: 9, maxHp: 9, ac: 14, attack: 3, damage: '1d8+1', saves: { doom: 11, ray: 12, hold: 11, blast: 13, spell: 12 } },
+          zombie: { name: 'Zombie', hp: 12, maxHp: 12, ac: 11, attack: 1, damage: '1d8', saves: { doom: 9, ray: 12, hold: 9, blast: 13, spell: 10 } },
+          brigand: { name: 'Brigand', hp: 12, maxHp: 12, ac: 14, attack: 3, damage: '1d8+1', saves: { doom: 11, ray: 12, hold: 11, blast: 13, spell: 12 } },
+          breggle_guard: { name: 'Breggle Guard', hp: 14, maxHp: 14, ac: 15, attack: 2, damage: '1d8+1', saves: { doom: 10, ray: 11, hold: 10, blast: 12, spell: 11 } },
+          ghoul: { name: 'Ghoul', hp: 9, maxHp: 9, ac: 12, attack: 2, damage: '1d6+1', saves: { doom: 9, ray: 11, hold: 9, blast: 12, spell: 10 } }
+        },
+        strong: {
+          ogre: { name: 'Ogre', hp: 28, maxHp: 28, ac: 13, attack: 5, damage: '1d10+3', saves: { doom: 8, ray: 9, hold: 8, blast: 10, spell: 9 } },
+          owlbear: { name: 'Owlbear', hp: 32, maxHp: 32, ac: 13, attack: 4, damage: '1d8+2', saves: { doom: 7, ray: 8, hold: 7, blast: 9, spell: 8 } },
+          wight: { name: 'Wight', hp: 22, maxHp: 22, ac: 14, attack: 3, damage: '1d6+1', saves: { doom: 6, ray: 7, hold: 6, blast: 8, spell: 7 } },
+          troll: { name: 'Troll', hp: 40, maxHp: 40, ac: 13, attack: 6, damage: '1d8+3', saves: { doom: 5, ray: 6, hold: 5, blast: 7, spell: 6 } },
+          young_dragon: { name: 'Young Wyrm', hp: 45, maxHp: 45, ac: 16, attack: 7, damage: '1d10+4', saves: { doom: 4, ray: 5, hold: 4, blast: 6, spell: 5 } },
+          minotaur: { name: 'Minotaur', hp: 36, maxHp: 36, ac: 14, attack: 6, damage: '1d10+3', saves: { doom: 6, ray: 7, hold: 6, blast: 8, spell: 7 } }
+        },
+        dolmenwood: {
+          drune_cultist: { name: 'Drune Cultist', hp: 6, maxHp: 6, ac: 12, attack: 2, damage: '1d6', saves: { doom: 11, ray: 12, hold: 11, blast: 13, spell: 12 } },
+          witch_hunter: { name: 'Witch Hunter', hp: 16, maxHp: 16, ac: 15, attack: 4, damage: '1d8+2', saves: { doom: 9, ray: 10, hold: 9, blast: 11, spell: 10 } },
+          fungal_zombie: { name: 'Fungal Zombie', hp: 10, maxHp: 10, ac: 11, attack: 1, damage: '1d6', saves: { doom: 8, ray: 11, hold: 8, blast: 12, spell: 9 } },
+          nag_servant: { name: 'Nag-Lord Servant', hp: 18, maxHp: 18, ac: 14, attack: 3, damage: '1d8+1', saves: { doom: 8, ray: 9, hold: 8, blast: 10, spell: 9 } },
+          breggle_longhorn: { name: 'Breggle Longhorn', hp: 20, maxHp: 20, ac: 16, attack: 4, damage: '1d8+2', saves: { doom: 7, ray: 8, hold: 7, blast: 9, spell: 8 } },
+          fairy_knight: { name: 'Fairy Knight', hp: 24, maxHp: 24, ac: 17, attack: 5, damage: '1d10+2', saves: { doom: 6, ray: 7, hold: 6, blast: 8, spell: 7 } },
+          woodgrue: { name: 'Woodgrue Wanderer', hp: 8, maxHp: 8, ac: 13, attack: 2, damage: '1d6', saves: { doom: 12, ray: 13, hold: 11, blast: 13, spell: 12 } },
+          hag: { name: 'Bog Hag', hp: 35, maxHp: 35, ac: 15, attack: 6, damage: '1d8+3', saves: { doom: 5, ray: 6, hold: 5, blast: 7, spell: 6 } },
+          cold_prince: { name: 'Cold Prince', hp: 30, maxHp: 30, ac: 16, attack: 5, damage: '1d8+2', saves: { doom: 6, ray: 7, hold: 6, blast: 8, spell: 7 } }
+        }
+      };
+
+      const statusEffects = [
+        { id: 'poisoned', name: 'Poisoned', color: 'bg-green-500', duration: 10, affects: 'morale' },
+        { id: 'frightened', name: 'Frightened', color: 'bg-yellow-500', duration: 5, affects: 'morale' },
+        { id: 'bleeding', name: 'Bleeding', color: 'bg-red-500', duration: 3, affects: 'morale' },
+        { id: 'stunned', name: 'Stunned', color: 'bg-purple-500', duration: 1, affects: 'morale' },
+        { id: 'unconscious', name: 'Unconscious', color: 'bg-gray-500', duration: 0, affects: 'morale' },
+        { id: 'dead', name: 'Dead', color: 'bg-black', duration: 0, affects: 'morale' },
+        { id: 'concentrating', name: 'Concentrating', color: 'bg-blue-500', duration: 0, affects: 'special' },
+        { id: 'charmed', name: 'Charmed', color: 'bg-pink-500', duration: 5, affects: 'special' },
+        { id: 'hexed', name: 'Hexed', color: 'bg-indigo-500', duration: 10, affects: 'special' }
+      ];
+
+      const declaredActions = [
+        { id: 'none', name: '⏸️ No Action', description: 'Not declaring any specific action' },
+        { id: 'attack', name: '⚔️ Attack', description: 'Melee or ranged attack' },
+        { id: 'spell', name: '✨ Cast Spell', description: 'Casting a spell (disrupted if damaged)' },
+        { id: 'flee', name: '🏃 Flee Melee', description: 'Attempt to escape from melee combat' },
+        { id: 'parry', name: '🛡️ Parry', description: 'Defensive stance, better AC' },
+        { id: 'move', name: '🚶 Move', description: 'Movement or positioning' },
+        { id: 'other', name: '🎯 Other', description: 'Special action or ability' }
+      ];
+
+      const saveToHistory = (action) => {
+        setActionHistory((prev) => [...prev.slice(-19), action]);
+      };
+
+      const undoLastAction = () => {
+        if (actionHistory.length === 0) return;
+        const lastAction = actionHistory[actionHistory.length - 1];
+        if (lastAction.type === 'damage') {
+          setCombatants((prev) => prev.map((c) => (c.id === lastAction.targetId ? { ...c, hp: Math.min(c.maxHp, c.hp + lastAction.amount) } : c)));
+        } else if (lastAction.type === 'heal') {
+          setCombatants((prev) => prev.map((c) => (c.id === lastAction.targetId ? { ...c, hp: Math.max(0, c.hp - lastAction.amount) } : c)));
+        } else if (lastAction.type === 'status_add') {
+          removeStatus(lastAction.targetId, lastAction.statusId);
+        }
+        setActionHistory((prev) => prev.slice(0, -1));
+      };
+
+      const addCombatant = (category = null, key = null, count = 1) => {
+        const newCombatants = [];
+        for (let i = 0; i < count; i++) {
+          let combatant;
+          if (category && key) {
+            combatant = { ...monsterTemplates[category][key], id: Date.now() + i, statuses: [], notes: '', declaredAction: 'none', concentratingOn: '' };
+            if (count > 1) combatant.name += ` ${i + 1}`;
+          } else {
+            combatant = { ...newCombatant, id: Date.now() + i, statuses: [], notes: '', declaredAction: 'none', concentratingOn: '' };
+          }
+          combatant.name = combatant.name.trim() || 'Unnamed Combatant';
+          combatant.hp = Math.max(0, combatant.hp);
+          combatant.maxHp = Math.max(1, combatant.maxHp);
+          combatant.ac = Math.max(1, Math.min(30, combatant.ac));
+          combatant.attack = Math.max(-10, Math.min(20, combatant.attack));
+          combatant.damage = (combatant.damage || '1d6').trim();
+          newCombatants.push(combatant);
+        }
+        setCombatants((prev) => [...prev, ...newCombatants]);
+        if (!category) {
+          setNewCombatant({ name: '', hp: 10, maxHp: 10, ac: 10, attack: 0, damage: '1d6', initiative: 0, type: 'npc', isPlayer: false, declaredAction: 'none', concentratingOn: '', saves: { doom: 13, ray: 14, hold: 13, blast: 15, spell: 14 } });
+        }
+      };
+
+      const applyDamage = (id, damage, source = 'manual') => {
+        const combatant = combatants.find((c) => c.id === id);
+        if (!combatant) return;
+        const actualDamage = Math.min(damage, combatant.hp);
+        setCombatants((prev) => prev.map((c) => (c.id === id ? { ...c, hp: Math.max(0, c.hp - actualDamage) } : c)));
+        if (combatant.concentratingOn && damage > 0) {
+          rollConcentrationCheck(combatant, damage);
+        }
+        saveToHistory({ type: 'damage', targetId: id, amount: actualDamage, source, timestamp: Date.now() });
+      };
+
+      const applyHealing = (id, healing) => {
+        const combatant = combatants.find((c) => c.id === id);
+        if (!combatant) return;
+        const actualHealing = Math.min(healing, combatant.maxHp - combatant.hp);
+        setCombatants((prev) => prev.map((c) => (c.id === id ? { ...c, hp: Math.min(c.maxHp, c.hp + actualHealing) } : c)));
+        saveToHistory({ type: 'heal', targetId: id, amount: actualHealing, timestamp: Date.now() });
+      };
+
+      const rollConcentrationCheck = (combatant, damage) => {
+        const dc = Math.max(10, Math.floor(damage / 2));
+        const roll = Math.floor(Math.random() * 20) + 1;
+        const total = roll; // add CON mod if you track it
+        setLastRoll({ type: 'concentration', combatant: combatant.name, roll, dc, total, passed: total >= dc, spell: combatant.concentratingOn });
+        if (total < dc) {
+          setCombatants((prev) => prev.map((c) => (c.id === combatant.id ? { ...c, concentratingOn: '', statuses: c.statuses.filter((s) => s.id !== 'concentrating') } : c)));
+        }
+      };
+
+      const rollAttack = (combatant, targetAC, advantage = 'normal') => {
+        const roll1 = Math.floor(Math.random() * 20) + 1;
+        const roll2 = Math.floor(Math.random() * 20) + 1;
+        const finalRoll = advantage === 'advantage' ? Math.max(roll1, roll2) : advantage === 'disadvantage' ? Math.min(roll1, roll2) : roll1;
+        const total = finalRoll + (combatant.attack || 0);
+        const hit = finalRoll === 20 || total >= targetAC;
+        let damage = 0;
+        if (hit && combatant.damage) damage = rollDamage(combatant.damage);
+        return { roll: finalRoll, roll1, roll2, total, hit, damage, advantage };
+      };
+
+      const rollDamage = (damageString) => {
+        const s = (damageString || '').toLowerCase().replace(/\s+/g, '');
+        let damage = 0;
+        // general dice parser with optional modifier, supports 3d4, 2d6+2, etc.
+        const m = s.match(/(\d+)d(\d+)([+-]\d+)?/);
+        if (m) {
+          const n = parseInt(m[1], 10), die = parseInt(m[2], 10), mod = m[3] ? parseInt(m[3], 10) : 0;
+          for (let i = 0; i < n; i++) damage += Math.floor(Math.random() * die) + 1;
+          damage += mod;
+        } else {
+          // fallback simple number
+          const asNum = parseInt(s, 10);
+          damage = Number.isFinite(asNum) ? asNum : Math.floor(Math.random() * 6) + 1;
+        }
+        return Math.max(1, damage);
+      };
+
+      const rollMorale = (combatant) => {
+        const die1 = Math.floor(Math.random() * 6) + 1;
+        const die2 = Math.floor(Math.random() * 6) + 1;
+        const roll = die1 + die2;
+        const baseMorale = combatant.morale || 8;
+        const statusModifiers = { frightened: -2, stunned: -1, poisoned: -1, bleeding: -1, charmed: -1, hexed: -2, unconscious: -99, dead: -99 };
+        let moraleModifier = 0;
+        (combatant.statuses || []).forEach((s) => { if (statusModifiers[s.id]) moraleModifier += statusModifiers[s.id]; });
+        const hpPct = combatant.maxHp ? combatant.hp / combatant.maxHp : 1;
+        if (hpPct <= 0) moraleModifier -= 99; else if (hpPct <= 0.25) moraleModifier -= 2; else if (hpPct <= 0.5) moraleModifier -= 1;
+        const finalMorale = Math.max(2, baseMorale + moraleModifier);
+        const passed = roll <= finalMorale;
+        return { roll, morale: baseMorale, finalMorale, modifier: moraleModifier, passed };
+      };
+
+      const rollSavingThrow = (combatant, saveType) => {
+        const roll = Math.floor(Math.random() * 20) + 1;
+        const target = (combatant.saves && combatant.saves[saveType]) || 14;
+        const passed = roll >= target;
+        return { roll, target, passed, saveType };
+      };
+
+      const startTargeting = (attackerId, type) => setTargetingMode({ attacker: attackerId, type });
+
+      const selectTarget = (targetId) => {
+        if (!targetingMode) return;
+        const attacker = combatants.find((c) => c.id === targetingMode.attacker);
+        const target = combatants.find((c) => c.id === targetId);
+        if (!attacker || !target || attacker.hp <= 0) { setTargetingMode(null); return; }
+        if (targetingMode.type === 'attack') {
+          const result = rollAttack(attacker, target.ac, advantageMode);
+          setLastRoll({ type: 'attack', combatant: attacker.name, target: target.name, roll: result.roll, roll1: result.roll1, roll2: result.roll2, bonus: attacker.attack || 0, total: result.total, targetAC: target.ac, hit: result.hit, damage: result.damage, advantage: result.advantage });
+          if (result.hit) applyDamage(targetId, result.damage, 'attack');
+        }
+        setTargetingMode(null);
+        setAdvantageMode('normal');
+      };
+
+      const rollInitiative = () => {
+        setCombatants((prev) => prev.map((c) => ({ ...c, initiative: (Math.floor(Math.random() * 6) + 1) + (c.dexMod || 0) })));
+      };
+
+      const sortedCombatants = [...combatants].sort((a, b) => (b.initiative || 0) - (a.initiative || 0));
+
+      const nextTurn = () => {
+        const alive = sortedCombatants.filter((c) => c.hp > 0);
+        if (alive.length === 0) { setActiveIndex(0); return; }
+        const currentActiveIndex = Math.max(0, Math.min(activeIndex, alive.length - 1));
+        if (currentActiveIndex >= alive.length - 1) {
+          setActiveIndex(0);
+          setRound((r) => Math.min(r + 1, 999));
+          setCombatants((prev) => prev.map((c) => ({
+            ...c,
+            statuses: (c.statuses || []).map((s) => ({ ...s, rounds: Math.max(0, (s.rounds || 0) - 1) })).filter((s) => s.rounds > 0 || s.duration === 0),
+            declaredAction: 'none'
+          })));
+        } else {
+          setActiveIndex(currentActiveIndex + 1);
+        }
+      };
+
+      const addStatus = (combatantId, statusId) => {
+        const status = statusEffects.find((s) => s.id === statusId);
+        if (!status) return;
+        setCombatants((prev) => prev.map((c) => (c.id === combatantId ? { ...c, statuses: [...(c.statuses || []).filter((s) => s.id !== statusId), { ...status, rounds: status.duration }] } : c)));
+        saveToHistory({ type: 'status_add', targetId: combatantId, statusId, timestamp: Date.now() });
+      };
+
+      const removeStatus = (combatantId, statusId) => {
+        setCombatants((prev) => prev.map((c) => (c.id === combatantId ? { ...c, statuses: (c.statuses || []).filter((s) => s.id !== statusId) } : c)));
+      };
+
+      const updateCombatant = (id, field, value) => {
+        setCombatants((prev) => prev.map((c) => {
+          if (c.id !== id) return c;
+          const updates = { [field]: value };
+          if (field === 'hp') updates.hp = Math.max(0, Math.min(c.maxHp, Number(value)));
+          else if (field === 'maxHp') { updates.maxHp = Math.max(1, Number(value)); updates.hp = Math.min(c.hp, Number(value)); }
+          else if (field === 'ac') updates.ac = Math.max(1, Math.min(30, Number(value)));
+          else if (field === 'attack') updates.attack = Math.max(-10, Math.min(20, Number(value)));
+          return { ...c, ...updates };
+        }));
+      };
+
+      const applyCustomDamage = () => {
+        if (!customDamage.trim()) return;
+        const damage = rollDamage(customDamage);
+        // If you later add a multi-select targeting UI, wire it here. For now: apply to all.
+        combatants.forEach((c) => applyDamage(c.id, damage, 'custom'));
+        setCustomDamage('');
+        setTargetingMode(null);
+      };
+
+      return (
+        <div className="max-w-7xl mx-auto p-4 bg-gradient-to-br from-red-50 to-orange-50 min-h-screen">
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <span className="icon-sword text-3xl" />
+                <h1 className="text-3xl font-bold text-red-800">Dolmenwood Combat Calculator</h1>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-blue-800">Round {round}</div>
+                <div className="text-sm text-gray-600">{targetingMode ? `Targeting mode: ${targetingMode.type}` : 'Select targets by clicking combatants'}</div>
+              </div>
+            </div>
+
+            {/* Quick Add Monsters */}
+            <div className="dolmenwood-card p-4 rounded-lg mb-6 border border-gray-300">
+              <h3 className="text-lg font-semibold mb-4 dolmenwood-text">Quick Add Monsters</h3>
+              {Object.entries(monsterTemplates).map(([category, monsters]) => (
+                <div key={category} className="mb-4">
+                  <h4
+                    className="text-sm font-semibold mb-2 capitalize"
+                    style={{ color: category === 'weak' ? '#7a8471' : category === 'medium' ? '#d4af37' : category === 'strong' ? '#8b4513' : '#7a8471' }}
+                  >
+                    {category.toUpperCase()} {category === 'weak' ? '(Levels 1-2)' : category === 'medium' ? '(Levels 2-4)' : category === 'strong' ? '(Levels 4+)' : 'SPECIFIC'}
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {Object.entries(monsters).map(([key, monster]) => (
+                      <div key={key} className="flex">
+                        <button
+                          onClick={() => addCombatant(category, key, 1)}
+                          className={`dolmenwood-${category} hover:opacity-80 text-white px-2 py-2 rounded-l text-xs transition-opacity flex-1`}
+                          title={`HP: ${monster.hp}, AC: ${monster.ac}, Attack: +${monster.attack}`}
+                        >
+                          {monster.name}
+                        </button>
+                        <button
+                          onClick={() => {
+                            const count = parseInt(prompt('How many?', '3') || '1', 10) || 1;
+                            addCombatant(category, key, count);
+                          }}
+                          className={`dolmenwood-${category} hover:opacity-80 text-white px-1 py-2 rounded-r text-xs transition-opacity border-l border-white`}
+                          title="Add multiple"
+                        >
+                          +
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Combat Controls */}
+            {combatants.length > 0 && (
+              <div className="dolmenwood-card p-4 rounded-lg mb-6 border border-gray-300">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <h3 className="text-lg font-semibold dolmenwood-text">Combat Controls</h3>
+                  <div className="flex flex-wrap gap-4 items-center">
+                    {/* Target AC */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium dolmenwood-text">Target AC:</label>
+                      <input
+                        type="number"
+                        value={targetAC}
+                        onChange={(e) => setTargetAC(parseInt(e.target.value, 10) || 15)}
+                        className="w-16 border border-gray-400 rounded px-2 py-1 text-sm"
+                        min="1"
+                        max="25"
+                        title="Armour Class of target for manual attack rolls."
+                      />
+                    </div>
+                    {/* Advantage/Disadvantage */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium dolmenwood-text">Roll:</label>
+                      <select
+                        value={advantageMode}
+                        onChange={(e) => setAdvantageMode(e.target.value)}
+                        className="border border-gray-400 rounded px-2 py-1 text-sm"
+                        title="Roll mode for attack rolls. Advantage = 2d20 take higher; Disadvantage = 2d20 take lower."
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="advantage">Advantage</option>
+                        <option value="disadvantage">Disadvantage</option>
+                      </select>
+                    </div>
+                    {/* Custom Damage */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="2d6+3"
+                        value={customDamage}
+                        onChange={(e) => setCustomDamage(e.target.value)}
+                        className="w-20 border border-gray-400 rounded px-2 py-1 text-sm"
+                        title="Enter custom damage dice (e.g., 1d8+2, 2d6, 3d4+1)."
+                      />
+                      <button
+                        onClick={applyCustomDamage}
+                        className="dolmenwood-custom hover:opacity-80 text-white px-3 py-1 rounded text-sm"
+                        disabled={!customDamage.trim()}
+                        title="Apply the custom damage to all combatants (useful for area effects)."
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    {/* Actions */}
+                    <button onClick={rollInitiative} className="dolmenwood-moss hover:opacity-80 text-white px-4 py-2 rounded font-medium flex items-center gap-2" title="Roll d6 initiative for all combatants and sort by turn order.">
+                      <span className="icon-dice" /> Roll Initiative
+                    </button>
+                    <button onClick={nextTurn} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium" title="Advance to the next turn; on round end, reduce status durations and reset actions.">Next Turn</button>
+                    <button onClick={undoLastAction} className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded font-medium flex items-center gap-2" disabled={actionHistory.length === 0} title="Undo the last damage/heal/status change.">
+                      <span className="icon-undo" /> Undo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Add Custom Combatant */}
+            <div className="dolmenwood-card p-4 rounded-lg mb-6 border border-gray-300">
+              <h3 className="text-lg font-semibold mb-3 dolmenwood-text">Add Custom Combatant</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium mb-1 dolmenwood-text">Name</label>
+                  <input type="text" placeholder="e.g. Orc Captain" value={newCombatant.name} onChange={(e) => setNewCombatant({ ...newCombatant, name: e.target.value })} className="w-full border border-gray-400 rounded px-2 py-1 text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 dolmenwood-text">HP</label>
+                    <input type="number" value={newCombatant.hp} onChange={(e) => { const hp = parseInt(e.target.value, 10) || 0; setNewCombatant({ ...newCombatant, hp, maxHp: hp }); }} className="w-full border border-gray-400 rounded px-2 py-1 text-sm" min="1" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 dolmenwood-text">AC</label>
+                    <input type="number" value={newCombatant.ac} onChange={(e) => setNewCombatant({ ...newCombatant, ac: parseInt(e.target.value, 10) || 10 })} className="w-full border border-gray-400 rounded px-2 py-1 text-sm" min="1" max="25" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 dolmenwood-text">Attack</label>
+                    <input type="number" value={newCombatant.attack} onChange={(e) => setNewCombatant({ ...newCombatant, attack: parseInt(e.target.value, 10) || 0 })} className="w-full border border-gray-400 rounded px-2 py-1 text-sm" min="-5" max="20" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 dolmenwood-text">Damage</label>
+                    <input type="text" placeholder="1d8+2" value={newCombatant.damage} onChange={(e) => setNewCombatant({ ...newCombatant, damage: e.target.value })} className="w-full border border-gray-400 rounded px-2 py-1 text-sm" />
+                  </div>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium mb-1 dolmenwood-text">Type</label>
+                    <select value={newCombatant.type} onChange={(e) => setNewCombatant({ ...newCombatant, type: e.target.value, isPlayer: e.target.value === 'player' })} className="w-full border border-gray-400 rounded px-2 py-1 text-sm">
+                      <option value="npc">Monster/NPC</option>
+                      <option value="player">Player Character</option>
+                    </select>
+                  </div>
+                  <button onClick={() => addCombatant()} className="dolmenwood-accent hover:opacity-80 text-white px-6 py-2 rounded font-medium disabled:bg-gray-400" disabled={!newCombatant.name.trim()}>Add</button>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4 pt-4 border-t border-gray-300">
+                <button
+                  onClick={() => {
+                    if (window.confirm('Clear all combatants?')) {
+                      setCombatants([]);
+                      setRound(1);
+                      setActiveIndex(0);
+                      setActionHistory([]);
+                      setLastRoll(null);
+                    }
+                  }}
+                  className="dolmenwood-bark hover:opacity-80 text-white px-4 py-2 rounded font-medium"
+                  disabled={combatants.length === 0}
+                  title="Remove all combatants and reset the encounter."
+                >
+                  Clear All
+                </button>
+                <div className="ml-auto text-sm dolmenwood-text flex items-center">
+                  <strong>{combatants.length}</strong>&nbsp;combatants,&nbsp;<strong>{combatants.filter((c) => c.hp > 0).length}</strong>&nbsp;alive
+                </div>
+              </div>
+            </div>
+
+            {/* Roll Results Display */}
+            {lastRoll && (
+              <div className={`mb-6 p-4 rounded-lg border-2 ${lastRoll.type === 'attack' ? (lastRoll.hit ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50') : lastRoll.type === 'concentration' ? (lastRoll.passed ? 'border-blue-500 bg-blue-50' : 'border-yellow-500 bg-yellow-50') : lastRoll.passed ? 'border-blue-500 bg-blue-50' : 'border-yellow-500 bg-yellow-50'}`}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    {lastRoll.type === 'attack' && (
+                      <div>
+                        <h4 className="font-bold text-lg">{lastRoll.hit ? 'HIT!' : 'MISS!'} — {lastRoll.combatant} → {lastRoll.target}</h4>
+                        <p className="text-sm mt-1">
+                          Roll: {lastRoll.advantage === 'advantage' ? `${lastRoll.roll1}, ${lastRoll.roll2} (advantage)` : lastRoll.advantage === 'disadvantage' ? `${lastRoll.roll1}, ${lastRoll.roll2} (disadvantage)` : lastRoll.roll} + {lastRoll.bonus} = {lastRoll.total} vs AC {lastRoll.targetAC}
+                          {lastRoll.hit && ` | Damage: ${lastRoll.damage}`}
+                        </p>
+                      </div>
+                    )}
+                    {lastRoll.type === 'concentration' && (
+                      <div>
+                        <h4 className="font-bold text-lg">{lastRoll.passed ? 'CONCENTRATION HELD' : 'CONCENTRATION BROKEN'} — {lastRoll.combatant}</h4>
+                        <p className="text-sm mt-1">Roll: {lastRoll.roll} vs DC {lastRoll.dc} for {lastRoll.spell}</p>
+                      </div>
+                    )}
+                    {lastRoll.type === 'morale' && (
+                      <div>
+                        <h4 className="font-bold text-lg">{lastRoll.passed ? 'MORALE PASSED' : 'MORALE FAILED'} — {lastRoll.combatant}</h4>
+                        <p className="text-sm mt-1">Roll: {lastRoll.roll} vs Morale {lastRoll.finalMorale}{lastRoll.modifier !== 0 && ` (Base ${lastRoll.morale} ${lastRoll.modifier >= 0 ? '+' : ''}${lastRoll.modifier})`}</p>
+                      </div>
+                    )}
+                    {lastRoll.type === 'save' && (
+                      <div>
+                        <h4 className="font-bold text-lg">{lastRoll.passed ? 'SAVE PASSED' : 'SAVE FAILED'} — {lastRoll.combatant}</h4>
+                        <p className="text-sm mt-1">{lastRoll.saveType.toUpperCase()} Save: {lastRoll.roll} vs {lastRoll.target}</p>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setLastRoll(null)} className="text-gray-400 hover:text-gray-600 text-xl font-bold" aria-label="Dismiss roll results">×</button>
+                </div>
+              </div>
+            )}
+
+            {/* Combat Tracker */}
+            <div className="space-y-3">
+              {sortedCombatants.map((combatant, index) => (
+                <div
+                  key={combatant.id}
+                  className={`p-4 rounded-lg border-2 transition-all cursor-pointer ${targetingMode ? 'targeting border-yellow-400 bg-yellow-50' : index === activeIndex ? 'border-yellow-400 bg-yellow-50 shadow-lg' : combatant.hp <= 0 ? 'border-red-300 bg-red-50 opacity-60' : combatant.isPlayer ? 'border-blue-300 bg-blue-50' : 'border-gray-300 bg-white'}`}
+                  onClick={() => targetingMode && selectTarget(combatant.id)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="text-xl font-bold" title={`${combatant.name}${combatant.isPlayer ? ' (Player Character)' : ' (NPC/Monster)'}${index === activeIndex ? ' - Currently Active' : ''}${combatant.hp <= 0 ? ' - DEAD (cannot take actions)' : ''}`}>
+                        {combatant.name}
+                        {combatant.isPlayer && <span className="text-blue-600 ml-2" title="Player Character">👤</span>}
+                        {index === activeIndex && <span className="text-yellow-600 ml-2" title="Currently Active Turn">▶️</span>}
+                        {combatant.hp <= 0 && <span className="text-red-600 ml-2" title="Dead - Cannot Take Actions">💀</span>}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <div className="flex items-center gap-2" title={`Current HP: ${combatant.hp} / Maximum HP: ${combatant.maxHp}`}>
+                          <span className="icon-heart text-red-500" />
+                          <span className={`font-semibold ${combatant.hp <= combatant.maxHp * 0.25 ? 'text-red-600' : 'text-green-600'}`}>{combatant.hp}/{combatant.maxHp}</span>
+                        </div>
+                        <div className="flex items-center gap-2" title={`Armour Class: ${combatant.ac}`}>
+                          <span className="icon-shield text-blue-500" />
+                          <span className="font-semibold">AC {combatant.ac}</span>
+                        </div>
+                        <div className="flex items-center gap-2" title={`Attack Bonus: +${combatant.attack}`}>
+                          <span className="icon-sword text-orange-500" />
+                          <span className="font-semibold">+{combatant.attack}</span>
+                        </div>
+                        <div className="flex items-center gap-2" title={`Damage: ${combatant.damage}`}>
+                          <span className="text-purple-500">💥</span>
+                          <span className="font-semibold">{combatant.damage}</span>
+                        </div>
+                        <div className="flex items-center gap-2" title={`Initiative: ${combatant.initiative}`}>
+                          <span className="icon-dice text-purple-500" />
+                          <span className="font-semibold">Init {combatant.initiative}</span>
+                        </div>
+                        {/* Declared Action */}
+                        <div className="flex items-center gap-2" title="Declared Action for this round.">
+                          <span className="text-gray-500 text-sm font-medium">Action:</span>
+                          <select
+                            value={combatant.declaredAction}
+                            onChange={(e) => { if (combatant.hp > 0) updateCombatant(combatant.id, 'declaredAction', e.target.value); }}
+                            className={`border border-gray-300 rounded px-2 py-1 text-xs ${combatant.hp <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={(e) => e.stopPropagation()}
+                            disabled={combatant.hp <= 0}
+                          >
+                            {declaredActions.map((a) => (
+                              <option key={a.id} value={a.id} title={a.description}>{a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={(e) => { e.stopPropagation(); setCombatants((prev) => prev.filter((c) => c.id !== combatant.id)); }} className="dolmenwood-remove hover:opacity-80 text-white px-3 py-1 rounded text-sm" title="Remove this combatant">Remove</button>
+                    </div>
+                  </div>
+
+                  {/* Status Effects & Concentration */}
+                  <div className="mt-2 flex flex-wrap gap-2 items-center">
+                    {(combatant.statuses || []).map((status) => (
+                      <span key={status.id} className={`${status.color} text-white px-2 py-1 rounded text-xs flex items-center gap-1`} title={`${status.name}${status.rounds > 0 ? ` - ${status.rounds} rounds remaining` : ''} (Click × to remove)`}>
+                        {status.name}
+                        {status.rounds > 0 && <span>({status.rounds})</span>}
+                        <button onClick={(e) => { e.stopPropagation(); removeStatus(combatant.id, status.id); }} className="ml-1 text-white hover:text-red-200" title="Remove this status">×</button>
+                      </span>
+                    ))}
+                    {combatant.concentratingOn && (
+                      <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs" title={`Concentrating on ${combatant.concentratingOn} — breaks on failed save when damaged.`}>🧠 {combatant.concentratingOn}</span>
+                    )}
+                  </div>
+
+                  {/* Action Buttons Grid */}
+                  <div className="mt-3 grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 gap-2">
+                    {/* HP Adjustment */}
+                    <div className="flex gap-1">
+                      <button onClick={(e) => { e.stopPropagation(); applyDamage(combatant.id, 1); }} className="dolmenwood-damage hover:opacity-80 text-white px-2 py-1 rounded text-xs flex-1" title="Apply 1 damage">-1</button>
+                      <button onClick={(e) => { e.stopPropagation(); applyDamage(combatant.id, 5); }} className="dolmenwood-damage hover:opacity-80 text-white px-2 py-1 rounded text-xs flex-1" title="Apply 5 damage">-5</button>
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={(e) => { e.stopPropagation(); applyHealing(combatant.id, 1); }} className="dolmenwood-heal hover:opacity-80 text-white px-2 py-1 rounded text-xs flex-1" title="Heal 1 HP">+1</button>
+                      <button onClick={(e) => { e.stopPropagation(); applyHealing(combatant.id, 5); }} className="dolmenwood-heal hover:opacity-80 text-white px-2 py-1 rounded text-xs flex-1" title="Heal 5 HP">+5</button>
+                    </div>
+                    {/* Status Effects */}
+                    <select
+                      onChange={(e) => { if (e.target.value && combatant.hp > 0) { addStatus(combatant.id, e.target.value); } e.target.value = ''; }}
+                      className={`border border-gray-400 rounded px-2 py-1 text-xs ${combatant.hp <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      defaultValue=""
+                      onClick={(e) => e.stopPropagation()}
+                      disabled={combatant.hp <= 0}
+                      title="Add a status effect"
+                    >
+                      <option value="">Add Status…</option>
+                      {statusEffects.map((s) => (
+                        <option key={s.id} value={s.id} title={`${s.name} - Lasts ${s.duration} rounds`}>{s.name}</option>
+                      ))}
+                    </select>
+                    {/* Concentration */}
+                    <input
+                      type="text"
+                      placeholder="Spell…"
+                      value={combatant.concentratingOn || ''}
+                      onChange={(e) => {
+                        if (combatant.hp > 0) {
+                          updateCombatant(combatant.id, 'concentratingOn', e.target.value);
+                          if (e.target.value && !(combatant.statuses || []).find((s) => s.id === 'concentrating')) addStatus(combatant.id, 'concentrating');
+                          else if (!e.target.value) removeStatus(combatant.id, 'concentrating');
+                        }
+                      }}
+                      className={`border border-gray-400 rounded px-2 py-1 text-xs ${combatant.hp <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      onClick={(e) => e.stopPropagation()}
+                      disabled={combatant.hp <= 0}
+                      title="Track concentration"
+                    />
+                    {/* Notes */}
+                    <input type="text" placeholder="Notes…" value={combatant.notes || ''} onChange={(e) => updateCombatant(combatant.id, 'notes', e.target.value)} className="border border-gray-400 rounded px-2 py-1 text-xs" onClick={(e) => e.stopPropagation()} title="Notes" />
+                    {/* Attack */}
+                    <button onClick={(e) => { e.stopPropagation(); if (combatant.hp <= 0) return; startTargeting(combatant.id, 'attack'); }} className={`dolmenwood-attack hover:opacity-80 text-white px-2 py-1 rounded text-xs ${combatant.hp <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={combatant.hp <= 0} title="Click then choose a target.">
+                      <span className="icon-target" /> Attack
+                    </button>
+                    {/* Morale */}
+                    <button onClick={(e) => { e.stopPropagation(); if (combatant.hp <= 0) return; const result = rollMorale(combatant); setLastRoll({ type: 'morale', combatant: combatant.name, roll: result.roll, morale: result.morale, finalMorale: result.finalMorale, modifier: result.modifier, passed: result.passed }); }} className={`dolmenwood-morale hover:opacity-80 text-white px-2 py-1 rounded text-xs ${combatant.hp <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={combatant.hp <= 0} title="Roll morale (2d6 ≤ morale).">
+                      Morale
+                    </button>
+                    {/* Saves */}
+                    <select
+                      onChange={(e) => { if (e.target.value && combatant.hp > 0) { const result = rollSavingThrow(combatant, e.target.value); setLastRoll({ type: 'save', combatant: combatant.name, saveType: e.target.value, roll: result.roll, target: result.target, passed: result.passed }); } e.target.value = ''; }}
+                      className={`border border-gray-400 rounded px-2 py-1 text-xs ${combatant.hp <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      defaultValue=""
+                      onClick={(e) => e.stopPropagation()}
+                      disabled={combatant.hp <= 0}
+                      title="Roll a saving throw"
+                    >
+                      <option value="">Save…</option>
+                      <option value="doom">Doom</option>
+                      <option value="ray">Ray</option>
+                      <option value="hold">Hold</option>
+                      <option value="blast">Blast</option>
+                      <option value="spell">Spell</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {combatants.length === 0 && (
+              <div className="text-center py-8 dolmenwood-text opacity-60">
+                <span className="icon-sword text-4xl block mb-2" />
+                <p>No combatants added yet. Use the quick add buttons or custom form above.</p>
+              </div>
+            )}
+
+            {/* Combat Summary */}
+            {combatants.length > 0 && (
+              <div className="mt-6 dolmenwood-card p-4 rounded-lg border border-gray-300">
+                <h3 className="font-semibold mb-2 dolmenwood-text">Combat Summary</h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm dolmenwood-text">
+                  <div><strong>Active:</strong> {sortedCombatants[activeIndex]?.name || 'None'}</div>
+                  <div><strong>Alive:</strong> {combatants.filter((c) => c.hp > 0).length}/{combatants.length}</div>
+                  <div><strong>Players:</strong> {combatants.filter((c) => c.isPlayer && c.hp > 0).length}</div>
+                  <div><strong>NPCs:</strong> {combatants.filter((c) => !c.isPlayer && c.hp > 0).length}</div>
+                  <div><strong>Actions:</strong> {actionHistory.length}/20 tracked</div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-gray-300">
+                  <h4 className="font-medium mb-2">Declared Actions This Round:</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    {declaredActions.filter((a) => a.id !== 'none').map((a) => {
+                      const count = combatants.filter((c) => c.declaredAction === a.id && c.hp > 0).length;
+                      return count > 0 ? (
+                        <div key={a.id} className="flex justify-between"><span>{a.name}:</span><span className="font-semibold">{count}</span></div>
+                      ) : null;
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Reference */}
+            <div className="mt-6 dolmenwood-card p-4 rounded-lg border border-gray-300">
+              <h3 className="font-semibold mb-2 dolmenwood-text">Dolmenwood Quick Reference</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <h4 className="font-medium mb-1">Initiative:</h4>
+                  <p>• Roll d6 at start of combat<br />• Declare actions before rolling<br />• Spell disrupted if damaged before acting</p>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-1">Saves (d20, roll ≥ target):</h4>
+                  <p>• <strong>Doom:</strong> Death, poison, disease<br />• <strong>Ray:</strong> Rays, wands<br />• <strong>Hold:</strong> Paralysis, petrification<br />• <strong>Blast:</strong> Breath weapons<br />• <strong>Spell:</strong> Other spells</p>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-1">Morale (2d6):</h4>
+                  <p>• Check when 50% casualties<br />• Check when leader dies<br />• Modified by HP and status<br />• Roll ≤ morale to pass</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Legacy render (works under React 18 UMD)
+    ReactDOM.render(<DolmenwoodCombatCalculator />, document.getElementById('root'));
+  </script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dolmenwood Custom Styles */
+@layer base {
+  :root {
+    --dolmenwood-card: #f7f5f0;
+    --dolmenwood-border: #8b7355;
+    --dolmenwood-text: #2d4a1a;
+    --dolmenwood-accent: #8b7355;
+    --dolmenwood-moss: #7a8471;
+    --dolmenwood-bark: #654321;
+    --dolmenwood-gold: #d4af37;
+  }
+}
+
+@layer components {
+  .dolmenwood-card {
+    background: var(--dolmenwood-card);
+    border-color: var(--dolmenwood-border);
+  }
+
+  .dolmenwood-text {
+    color: var(--dolmenwood-text);
+  }
+
+  /* Category Colors */
+  .dolmenwood-weak {
+    background: var(--dolmenwood-moss);
+  }
+
+  .dolmenwood-medium {
+    background: var(--dolmenwood-gold);
+  }
+
+  .dolmenwood-strong {
+    background: #8b4513;
+  }
+
+  /* Targeting Animation */
+  .targeting {
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      border-color: #f59e0b;
+      background-color: #fef3c7;
+    }
+    50% {
+      border-color: #d97706;
+      background-color: #fed7aa;
+    }
+  }
+}

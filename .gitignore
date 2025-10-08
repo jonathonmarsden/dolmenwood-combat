@@ -1,0 +1,22 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+*.local
+
+# Editor directories
+.vscode/*
+.idea
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Netlify
+.netlify
+
+# Logs
+*.log
